@@ -1,0 +1,91 @@
+def jobName = 'bgdeploy'
+
+def jobPath = "/${jobName}"
+def isProduction = false
+def buildPath = "${JOB_NAME}"
+
+if (buildPath.contains("")) {
+  jobPath = "/${jobName}"
+  isProduction = true
+}
+
+pipelineJob(jobPath) {
+  displayName('Manage DNS')
+  logRotator(-1, 1)
+  parameters {
+    if (isProduction) {
+      cascadeChoiceParameter {
+        name('Alias')
+        script {
+          groovyScript {
+            script {
+              sandbox(true)
+              script('''
+                return []
+              ''')
+            }
+            fallbackScript {
+              sandbox(true)
+              script('')
+            }
+          }
+        }
+        choiceType('PT_SINGLE_SELECT')
+        description('Select a URL to manage')
+        randomName('alias-select')
+        filterable(false)
+        referencedParameters('Application')
+      }
+    }
+    else {
+      cascadeChoiceParameter {
+        name('Alias')
+        script {
+          groovyScript {
+            script {
+              sandbox(true)
+              script('''
+                return [
+                  
+                ]
+              ''')
+            }
+            fallbackScript {
+              sandbox(true)
+              script('')
+            }
+          }
+        }
+        choiceType('PT_SINGLE_SELECT')
+        description('Choose a URL to manage')
+        randomName('alias-select')
+        filterable(false)
+        referencedParameters('Application')
+      }
+    }
+    choiceParam('Action', ['create', 'migrate', 'remove'], 'Create a new association, migrate an alias to a different target or remove an association')
+    dynamicReferenceParameter {
+      name('Target')
+      script {
+        groovyScript {
+          script {
+            sandbox(true)
+            script('''
+              if (Action.equals('create') || Action.equals('migrate')) {
+                return "<input name='value' value='${Target}' class='setting-input' type='text' placeholder=' Amazon URL (e.g. )'>"
+              } else {return '<b> --- Not Applicable --- </b>'}
+            ''')
+          }
+          fallbackScript {
+            sandbox(true)
+            script('')
+          }
+        }
+      }
+      choiceType('ET_FORMATTED_HTML')
+      description('If applicable (create/migrate only), associate alias with this target')
+      randomName('reference-text')
+      omitValueField(true)
+      referencedParameters('Alias, Action, Target')
+    }
+   

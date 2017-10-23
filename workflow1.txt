@@ -1,0 +1,179 @@
+def buildPath = "${JOB_NAME}"
+def executorLabel = "aws-commercial-agents"
+
+if (buildPath.contains("Prod-Deploy-Jobs")) {
+  executorLabel = "aws-commercial-prod-agents"
+}
+
+node(executorLabel) {
+// Defining empty string variables to ensure scope is valid
+  String endpoint
+  String response
+
+
+  if (params.Failover) {
+    endpoint = 
+  }
+  else {
+    endpoint = 
+  }
+
+// Modify ownership of the alias to ensure the requester has access when future functions are called
+  stage('Modifying Ownership') {
+    ansiColor('xterm') {
+      if (params.Action.equals('create')) {
+        print 'Association does not exist yet. Modification of ownership is not required. Proceeding...'
+      }
+      else {
+        print '\033[1m==================================================\nModifying Ownership\n==================================================\033[0m'
+        responseData = modifyOwner(endpoint)
+        print '\033[1m==================================================\nValidating Ownership\n==================================================\033[0m'
+        validateOwner(responseData)
+      }
+    }
+  }
+
+// Take action against the desired alias (i.e. create, remove)
+  stage('Changing Associations') {
+    ansiColor('xterm') {
+      switch (params.Action) {
+        case "create":
+          print '\033[1m==================================================\nCreating a new association\n==================================================\033[0m'
+          responseData = createAssociation(endpoint)
+          break
+        case "migrate":
+          print '\033[1m==================================================\nRemoving the old association\n==================================================\033[0m'
+          responseData = removeAssociation(endpoint)
+          print '\033[1m==================================================\nValidating that the association was removed\n==================================================\033[0m'
+          validateRemoval(responseData)
+          print '\033[1m==================================================\nCreating a new association\n==================================================\033[0m'
+          responseData = createAssociation(endpoint)
+          break
+        case "remove":
+          print '\033[1m==================================================\nRemoving the old association\n==================================================\033[0m'
+          responseData = removeAssociation(endpoint)
+          break
+        default:
+          error "There was a problem interpolating the 'ACTION' parameter"
+      }
+    }
+  }
+
+// Validate that all actions were performed without error, and fail the build if there was an issue (will not fail otherwise, because the 'curl' command succeeds)
+  stage('Validating Changes') {
+    ansiColor('xterm') {
+      switch (params.Action) {
+        case "create":
+          print '\033[1m==================================================\nValidating that the association was successful\n==================================================\033[0m'
+          validateCreation(responseData)
+          break
+        case "migrate":
+          print '\033[1m==================================================\nValidating that the association was successful\n==================================================\033[0m'
+          validateCreation(responseData)
+          break
+        case "remove":
+          print '\033[1m==================================================\nValidating that the association was removed\n==================================================\033[0m'
+          validateRemoval(responseData)
+          break
+        default:
+          error "There was a problem interpolating the 'ACTION' parameter"
+      }
+    }
+  }
+
+  stage ('Changing the Resource Record Sets') {
+    changeResourceRecord("us-west-2","Z1W9BXXXXXXXLB", "file:///root/change-resource-record-sets.json")
+  }
+
+  stage ('Getting a List of Active Environments in a give region') {
+    listActiveEnvironments("us-west-2")
+  }
+
+
+
+  deleteDir() // clean up workspace
+} // End of node
+
+// #####################################################################
+// #####################################################################
+
+// Functions referenced within the stages
+
+def changeResourceRecord(region, hostZoneID, resouceRecordJson) {
+
+  AWS_CLI_PATH = "/root/.bin/aws-cli"
+  output = sh returnStdout: true, script: AWS_CLI_PATH + " route53 change-resource-record-sets --region ${region} --hosted-zone-id ${hostZoneID} --change-batch ${resouceRecordJson}"
+  return output
+}
+
+def listActiveEnvironments(region) {
+
+  AWS_CLI_PATH = "/root/.bin/aws-cli"
+  REGION = "us-west-2"
+  output = sh returnStdout: true, script: AWS_CLI_PATH + " ec2 describe-instances --output table --filters \"Name=tag:environment,Values=test\" \"Name=tag:bluegreen,Values=test \" --region ${region}"
+  return output
+}
+
+def checkAlias(url) {
+  output = sh returnStdout: true, script: "nslookup ${url} || :"
+  return output
+}
+
+def createAssociation(apiEndpoint) {
+  output = sh returnStdout: true, script: """
+    set +x
+    curl -g --digest --user "${params.Username}:${params.Password}" \
+    --request POST --header "Content-Type: application/json" --ipv4 ${apiEndpoint} \
+    --data '{"host":"${params.Target}", "cname":"${params.Alias}", "ttl":"600"}'
+  """
+  return output
+}
+
+def removeAssociation(apiEndpoint) {
+  output = sh returnStdout: true, script: """
+    set +x
+    curl -g --digest --user "${params.Username}:${params.Password}" \
+    --request DELETE --header "Content-Type: application/json" --ipv4 "${apiEndpoint}?cname=${params.Alias}"
+  """
+  return output
+}
+
+def modifyOwner(apiEndpoint) {
+  output = sh returnStdout: true, script: """
+    set +x
+    curl -g --digest --user "${params.Username}:${params.Password}" \
+    --request PUT --header "Content-Type: application/json" --ipv4 ${apiEndpoint}/modifyOwnership \
+    --data '{"cname":"${params.Alias}", "requesterEid":"${params.Username}"}'
+  """
+  return output
+}
+
+def validateCreation(input) {
+  if (input.contains('failure') || input.contains('Error')) {
+    print input
+    error 'There was a error, please see console output'
+  }
+  else {
+    print "Association between \033[1m${params.Alias}\033[0m and \033[1m${params.Target}\033[0m was created successfully"
+  }
+}
+
+def validateRemoval(input) {
+  if (input.contains('failure') || input.contains('Error')) {
+    print input
+    error 'There was a error, please see console output'
+  }
+  else {
+    print "Association for \033[1m${params.Alias}\033[0m was removed successfully"
+  }
+}
+
+def validateOwner(input) {
+  if (input.contains('failure') || input.contains('Error')) {
+    print input
+    error 'There was a error, please see console output'
+  }
+  else {
+    print "Ownership for \033[1m${params.Alias}\033[0m was set successfully"
+  }
+}
