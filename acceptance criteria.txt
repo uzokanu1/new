@@ -1,0 +1,12 @@
+Jenkins will update Route53 second-tier DNS name to blue/green ELB (should be parametrized per env)
+
+https://confluence.kdc.capitalone.com/display/STRAT/ForgeRock+DNS+and+ELB+Topology
+
+Any DNS names should follow prescribed naming conventions (see OCI-14295)
+
+Job should be able to identify active environments in given account (may need to modify EC2 resource tags to accommodate)
+[look for tag "Environment" and tag "BlueGreen"]
+
+create job as job DSL job
+
+modify existing Jenkins pipeline to deploy DSL jobs
